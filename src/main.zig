@@ -4,6 +4,7 @@ const flags = @import("flags");
 const Shell = @import("shell.zig");
 const Tunnel = @import("ztunnel");
 const Server = @import("server.zig");
+const wShell = @import("windows.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -59,9 +60,14 @@ pub fn main() !void {
         var server = try Server.init(allocator, parsed.flags.host orelse "0.0.0.0", parsed.flags.port, keypair);
         var client = try server.accept();
         defer client.deinit();
-
-        var shell = try Shell.init(allocator, parsed.flags.shell);
-        try shell.run(client);
+        if (builtin.os.tag == .windows) {
+            std.debug.print("Starting shelll...\n", .{});
+            _ = try wShell.start();
+            std.debug.print("OK\n", .{});
+        } else {
+            var shell = try Shell.init(allocator, parsed.flags.shell);
+            try shell.run(client);
+        }
     } else {
         if (parsed.flags.host == null) {
             try stdout.print("Missing host to connect\n", .{});
@@ -70,6 +76,8 @@ pub fn main() !void {
         const stream = try std.net.tcpConnectToHost(allocator, parsed.flags.host.?, parsed.flags.port);
         var tunnel = Tunnel.init(allocator, stream, keypair);
         try tunnel.keyExchange(.client);
+
+        std.debug.print("Connected!\n", .{});
 
         if (builtin.os.tag != .windows) {
             const stdin = std.io.getStdIn();
