@@ -6,6 +6,36 @@ const Tunnel = @import("ztunnel");
 const Server = @import("server.zig");
 const wShell = @import("windows.zig");
 
+fn setNonBlock(sock: std.net.Stream) void {
+    if (builtin.os.tag == .windows) {
+        var mode: u32 = 1;
+        _ = std.os.windows.ws2_32.ioctlsocket(sock.handle, std.os.windows.ws2_32.FIONBIO, &mode);
+        var nodelay: u8 = 1;
+        _ = std.os.windows.ws2_32.setsockopt(
+            sock.handle,
+            std.os.windows.ws2_32.IPPROTO.TCP,
+            std.os.windows.ws2_32.TCP.NODELAY,
+            @ptrCast(&nodelay),
+            @sizeOf(u8),
+        );
+    } else {
+        const mode = std.posix.fcntl(sock.handle, std.c.F.GETFL, 0) catch unreachable;
+        if (mode == -1) return;
+        _ = std.posix.fcntl(sock.handle, std.c.F.SETFL, mode | 0x40000009) catch unreachable;
+    }
+}
+
+fn toogleTermRaw(handle: std.posix.fd_t) !void {
+    _ = .{handle};
+    if (builtin.os.tag != .windows) {
+        var term = try std.posix.tcgetattr(handle);
+        term.lflag.ECHO = !term.lflag.ECHO;
+        term.lflag.ISIG = !term.lflag.ISIG;
+        term.lflag.ICANON = !term.lflag.ICANON;
+        try std.posix.tcsetattr(handle, .FLUSH, term);
+    }
+}
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
@@ -27,7 +57,7 @@ pub fn main() !void {
     const stdout = std.io.getStdOut().writer();
 
     if (parsed.flags.help) {
-        try stdout.print("Usage: {s} [options]\nOptions: \n", .{"zshell"});
+        try stdout.print("Usage: {s} [options]\nOptions: \n", .{parsed.prog});
         try parsed.writeHelp(stdout);
         return;
     }
@@ -60,14 +90,9 @@ pub fn main() !void {
         var server = try Server.init(allocator, parsed.flags.host orelse "0.0.0.0", parsed.flags.port, keypair);
         var client = try server.accept();
         defer client.deinit();
-        if (builtin.os.tag == .windows) {
-            std.debug.print("Starting shelll...\n", .{});
-            _ = try wShell.start();
-            std.debug.print("OK\n", .{});
-        } else {
-            var shell = try Shell.init(allocator, parsed.flags.shell);
-            try shell.run(client);
-        }
+        setNonBlock(client.stream);
+        var shell = try Shell.init(allocator, parsed.flags.shell);
+        try shell.run(client);
     } else {
         if (parsed.flags.host == null) {
             try stdout.print("Missing host to connect\n", .{});
@@ -77,10 +102,14 @@ pub fn main() !void {
         var tunnel = Tunnel.init(allocator, stream, keypair);
         try tunnel.keyExchange(.client);
 
+        setNonBlock(stream);
+
         std.debug.print("Connected!\n", .{});
 
         if (builtin.os.tag != .windows) {
             const stdin = std.io.getStdIn();
+            try toogleTermRaw(stdin.handle);
+            defer toogleTermRaw(stdin.handle) catch {};
 
             var fds = [_]std.posix.pollfd{
                 .{
@@ -107,7 +136,7 @@ pub fn main() !void {
                             try tunnel.writeFrame(buffer[0..size]);
                         },
                         1 => {
-                            const data = try tunnel.readFrame(allocator);
+                            const data = tunnel.readFrame(allocator) catch return;
                             defer allocator.free(data);
                             try stdout.writeAll(data);
                         },
