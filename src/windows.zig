@@ -257,8 +257,8 @@ pub fn run(self: *Self, tunnel: Tunnel) !void {
     }};
 
     while (self.isAlive()) {
-        // TODO: This will spin the CPU when there is no data read from the socket or the terminal. Find a better way
-        // to poll on both ends
+        // TODO: This will spin the CPU when there is no data to read from the socket or the terminal. We need to find
+        // a better way to poll on both ends.
         if (std.os.windows.ws2_32.WSAPoll(&fds, fds.len, -1) == 0) continue;
         if (fds[0].revents & POLLWRNORM != 0) pipeToTunnel(self.hPipeOut, tunnel);
         if (fds[0].revents & POLLRDNORM == 0) continue;
