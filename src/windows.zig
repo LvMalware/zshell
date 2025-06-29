@@ -119,7 +119,7 @@ pInfo: windows.PROCESS_INFORMATION,
 hPipeIn: windows.HANDLE,
 hPipeOut: windows.HANDLE,
 allocator: std.mem.Allocator,
-pub fn init(allocator: std.mem.Allocator, shell: ?[]const u8) !Self {
+pub fn init(allocator: std.mem.Allocator, shell: []const u8) !Self {
     var conMode: windows.DWORD = 0;
 
     const hStdIn = CreateFileA(
@@ -202,7 +202,7 @@ pub fn init(allocator: std.mem.Allocator, shell: ?[]const u8) !Self {
 
     var pInfo: windows.PROCESS_INFORMATION = undefined;
 
-    const zCmd = try allocator.dupeZ(u8, shell orelse "powershell.exe");
+    const zCmd = try allocator.dupeZ(u8, shell);
     defer allocator.free(zCmd);
 
     if (!CreateProcessA(null, zCmd, null, null, false, EXTENDED_STARTUPINFO_PRESENT, null, null, &sInfo, &pInfo))
