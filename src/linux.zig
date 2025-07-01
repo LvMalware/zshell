@@ -3,7 +3,7 @@ const Tunnel = @import("ztunnel");
 const builtin = @import("builtin");
 
 const c = @cImport({
-    @cInclude("pty.h");
+    @cInclude(if (builtin.os.tag == .freebsd) "libutil.h" else "pty.h");
 });
 
 const Self = @This();
@@ -15,8 +15,8 @@ pub fn init(allocator: std.mem.Allocator, shell: []const u8) !Self {
     // TODO: handle winsize
     var fd: std.posix.fd_t = 0;
     const pid = c.forkpty(&fd, null, null, null);
-    if (pid == 0) std.process.execv(allocator, &[_][]const u8{shell}) catch {};
     if (pid < 0) return error.ForkPTY;
+    if (pid == 0) std.process.execv(allocator, &[_][]const u8{shell}) catch {};
 
     return .{
         .master = fd,
@@ -44,7 +44,7 @@ pub fn run(self: *Self, tunnel: Tunnel) !void {
         if (try std.posix.poll(&fds, -1) == 0) continue;
         if (fds[0].revents != 0) {
             const size = std.posix.read(fds[0].fd, &buffer) catch |err| switch (err) {
-                error.InputOutput => return,
+                error.InputOutput => break,
                 else => return err,
             };
             if (size == 0) continue;
