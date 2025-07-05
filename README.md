@@ -65,4 +65,19 @@ Run server to listen to port 4444 and wait for the reverse shell above:
 zshell --port 4444 --server --reverse
 ```
 
+## Meta
+
+Lucas V. Araujo – root@lva.sh
+
+Distributed under the GNU GPL-3.0+ license. See ``LICENSE`` for more information.
+
+[https://github.com/LvMalware/zshell](https://github.com/LvMalware/zshell)
+
+## Contributing
+
+1. Fork it (<https://github.com/LvMalware/zshell/fork>)
+2. Create your feature branch (`git checkout -b feature/fooBar`)
+3. Commit your changes (`git commit -am 'Add some fooBar'`)
+4. Push to the branch (`git push origin feature/fooBar`)
+5. Create a new Pull Request
 
