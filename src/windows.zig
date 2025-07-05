@@ -146,17 +146,14 @@ pub fn resize(self: *Self, cols: u16, rows: u16) void {
     });
 }
 
+// even though this function does nothing, we still need it because SleepEx won't know if the I/O operation was
+// completed unless a completion routine is called... (yes, windows is sh*t like that)
 fn overlap_callback(
     dwErrorCode: std.os.windows.DWORD,
     dwNumberOfBytesTransfered: std.os.windows.DWORD,
     lpOverlapped: ?*std.os.windows.OVERLAPPED,
 ) callconv(.C) void {
-    _ = .{lpOverlapped};
-    // std.debug.print("[CALLBACK] Error: 0x{x}, Read: {d} bytes\n", .{ dwErrorCode, dwNumberOfBytesTransfered });
-    if (dwErrorCode != 0 or dwNumberOfBytesTransfered == 0) return;
-    //conn.writeFrame(buffer[0..dwNumberOfBytesTransfered]) catch {
-    //    running = false;
-    //};
+    _ = .{ lpOverlapped, dwErrorCode, dwNumberOfBytesTransfered };
 }
 
 pub fn run(self: *Self, tunnel: Tunnel) !void {

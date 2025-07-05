@@ -9,6 +9,8 @@ const c = @cImport({
 });
 
 const SIGWINCH = 28;
+var last_rows: i16 = 0;
+var last_cols: i16 = 0;
 
 const SignalHandler = ?*const fn (c_int) callconv(.C) void;
 extern fn signal(sig: c_int, handler: SignalHandler) SignalHandler;
@@ -16,7 +18,6 @@ extern fn signal(sig: c_int, handler: SignalHandler) SignalHandler;
 const Self = @This();
 
 var conn: *Tunnel = undefined;
-//var running: bool = true;
 
 pub fn toogleTermRaw(handle: std.posix.fd_t) !void {
     if (builtin.os.tag == .windows) {
@@ -115,6 +116,21 @@ fn overlap_callback(
     lpOverlapped: ?*std.os.windows.OVERLAPPED,
 ) callconv(.C) void {
     _ = .{ lpOverlapped, dwErrorCode, dwNumberOfBytesTransfered };
+    var csbi: std.os.windows.CONSOLE_SCREEN_BUFFER_INFO = undefined;
+
+    const stdout = std.io.getStdOut().handle;
+    if (std.os.windows.kernel32.GetConsoleScreenBufferInfo(stdout, &csbi) == 0) return;
+    const rows = csbi.srWindow.Bottom - csbi.srWindow.Top + 1;
+    const columns = csbi.srWindow.Right - csbi.srWindow.Left + 1;
+    if (columns != last_cols or rows != last_rows) {
+        last_cols = columns;
+        last_rows = rows;
+        var data: [8]u8 = undefined;
+        std.mem.copyForwards(u8, &data, "\x00\xff\x00\xff");
+        std.mem.writeInt(u16, data[4..][0..2], @bitCast(last_cols), .big);
+        std.mem.writeInt(u16, data[6..][0..2], @bitCast(last_rows), .big);
+        conn.writeFrame(&data) catch {};
+    }
 }
 
 fn runWindows(self: Self) !void {
@@ -123,6 +139,7 @@ fn runWindows(self: Self) !void {
         .events = winapi.POLLRDNORM | winapi.POLLWRNORM,
         .revents = 0,
     }};
+
     var buffer: [4096]u8 = undefined;
 
     const hStdIn = winapi.CreateFileA(
@@ -145,12 +162,12 @@ fn runWindows(self: Self) !void {
     if (!winapi.ReadFileEx(hStdIn, &buffer, buffer.len, &overlap, overlap_callback)) return error.ReadFileEx;
 
     while (true) {
+        if (std.os.windows.ws2_32.WSAPoll(&fds, fds.len, -1) == 0) continue;
         if (winapi.SleepEx(10, true) == winapi.WAIT_IO_COMPLETION) {
             try conn.writeFrame(buffer[0..overlap.InternalHigh]);
             overlap = std.mem.zeroes(std.os.windows.OVERLAPPED);
             if (!winapi.ReadFileEx(hStdIn, &buffer, buffer.len, &overlap, overlap_callback)) return error.ReadFileEx;
         }
-        if (std.os.windows.ws2_32.WSAPoll(&fds, fds.len, -1) == 0) continue;
         if (fds[0].revents & winapi.POLLRDNORM == 0) continue;
         const data = try conn.readFrame(self.allocator);
         defer self.allocator.free(data);
