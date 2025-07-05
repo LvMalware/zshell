@@ -23,3 +23,7 @@ pub fn accept(self: *Self) !Tunnel {
     try client.keyExchange(.server);
     return client;
 }
+
+pub fn deinit(self: *Self) void {
+    self.server.deinit();
+}

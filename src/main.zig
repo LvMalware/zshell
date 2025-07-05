@@ -1,10 +1,11 @@
 const std = @import("std");
 const builtin = @import("builtin");
+
 const flags = @import("flags");
 const Shell = @import("shell.zig");
 const Tunnel = @import("ztunnel");
 const Server = @import("server.zig");
-const wShell = @import("windows.zig");
+const Console = @import("console.zig");
 
 fn setNonBlock(sock: std.net.Stream) void {
     if (builtin.os.tag == .windows) {
@@ -22,17 +23,6 @@ fn setNonBlock(sock: std.net.Stream) void {
         const mode = std.posix.fcntl(sock.handle, std.c.F.GETFL, 0) catch unreachable;
         if (mode == -1) return;
         _ = std.posix.fcntl(sock.handle, std.c.F.SETFL, mode | 0x40000009) catch unreachable;
-    }
-}
-
-fn toogleTermRaw(handle: std.posix.fd_t) !void {
-    _ = .{handle};
-    if (builtin.os.tag != .windows) {
-        var term = try std.posix.tcgetattr(handle);
-        term.lflag.ECHO = !term.lflag.ECHO;
-        term.lflag.ISIG = !term.lflag.ISIG;
-        term.lflag.ICANON = !term.lflag.ICANON;
-        try std.posix.tcsetattr(handle, .FLUSH, term);
     }
 }
 
@@ -88,6 +78,7 @@ pub fn main() !void {
 
     if (parsed.flags.server) {
         var server = try Server.init(allocator, parsed.flags.host orelse "0.0.0.0", parsed.flags.port, keypair);
+        defer server.deinit();
         var client = try server.accept();
         defer client.deinit();
         setNonBlock(client.stream);
@@ -106,44 +97,6 @@ pub fn main() !void {
 
         std.debug.print("Connected!\n", .{});
 
-        if (builtin.os.tag != .windows) {
-            const stdin = std.io.getStdIn();
-            try toogleTermRaw(stdin.handle);
-            defer toogleTermRaw(stdin.handle) catch {};
-
-            var fds = [_]std.posix.pollfd{
-                .{
-                    .fd = stdin.handle,
-                    .events = 1,
-                    .revents = 0,
-                },
-                .{
-                    .fd = tunnel.stream.handle,
-                    .events = 1,
-                    .revents = 0,
-                },
-            };
-            while (true) {
-                if (std.posix.poll(&fds, -1) catch break == 0) continue;
-                for (fds, 0..) |fd, i| {
-                    if (fd.revents == 0) continue;
-                    if (fd.revents == 16) return;
-                    switch (i) {
-                        0 => {
-                            var buffer: [4096]u8 = undefined;
-                            const size = try stdin.read(&buffer);
-                            if (size == 0) continue;
-                            try tunnel.writeFrame(buffer[0..size]);
-                        },
-                        1 => {
-                            const data = tunnel.readFrame(allocator) catch return;
-                            defer allocator.free(data);
-                            try stdout.writeAll(data);
-                        },
-                        else => unreachable,
-                    }
-                }
-            }
-        }
+        try Console.init(allocator, &tunnel).run();
     }
 }

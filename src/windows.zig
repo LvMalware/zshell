@@ -1,120 +1,13 @@
 const std = @import("std");
 const windows = std.os.windows;
 const Tunnel = @import("ztunnel");
+const winapi = @import("winapi.zig");
 
 const Self = @This();
 
-const HPCON = windows.HANDLE;
-
-const EXTENDED_STARTUPINFO_PRESENT = 0x00080000;
-
-const STARTUPINFO = extern struct {
-    cb: windows.DWORD,
-    lpReserved: ?windows.LPSTR,
-    lpDesktop: ?windows.LPSTR,
-    lpTitle: ?windows.LPSTR,
-    dwX: windows.DWORD,
-    dwY: windows.DWORD,
-    dwXSize: windows.DWORD,
-    dwYSize: windows.DWORD,
-    dwXCountChars: windows.DWORD,
-    dwYCountChars: windows.DWORD,
-    dwFillAttribute: windows.DWORD,
-    dwFlags: windows.DWORD,
-    wShowWindow: windows.WORD,
-    cbReserved2: windows.WORD,
-    lpReserved2: ?*anyopaque,
-    hStdInput: ?windows.HANDLE,
-    hStdOutput: ?windows.HANDLE,
-    hStdError: ?windows.HANDLE,
-};
-
-const STARTUPINFOEX = extern struct {
-    StartupInfo: STARTUPINFO,
-    lpAttributeList: ?*anyopaque,
-};
-
-extern "kernel32" fn CreatePseudoConsole(
-    size: windows.COORD,
-    hInput: windows.HANDLE,
-    hOutput: windows.HANDLE,
-    dwFlags: windows.DWORD,
-    phPC: *HPCON,
-) callconv(.C) windows.HRESULT;
-
-extern "kernel32" fn ResizePseudoConsole(
-    hPC: HPCON,
-    size: windows.COORD,
-) callconv(.C) windows.HRESULT;
-
-extern "kernel32" fn ClosePseudoConsole(
-    hPC: HPCON,
-) callconv(.C) void;
-
-extern "kernel32" fn CreatePipe(
-    hReadPipe: *windows.HANDLE,
-    hWritePipe: *windows.HANDLE,
-    lpPipeAttributes: ?*anyopaque,
-    nSize: windows.DWORD,
-) callconv(.C) bool;
-
-extern "kernel32" fn InitializeProcThreadAttributeList(
-    lpAttributeList: ?*anyopaque,
-    dwAttributeCount: windows.DWORD,
-    dwFlags: windows.DWORD,
-    lpSize: *usize,
-) callconv(.C) bool;
-
-extern "kernel32" fn UpdateProcThreadAttribute(
-    lpAttributeList: ?*anyopaque,
-    dwFlags: windows.DWORD,
-    Attribute: windows.DWORD,
-    lpValue: *anyopaque,
-    cbSize: usize,
-    lpPreviousValue: ?*anyopaque,
-    lpReturnSize: ?*usize,
-) callconv(.C) bool;
-
-extern "kernel32" fn CreateProcessA(
-    lpApplicationName: ?[*:0]const u8,
-    lpCommandLine: [*:0]const u8,
-    lpProcessAttributes: ?*anyopaque,
-    lpThreadAttributes: ?*anyopaque,
-    bInheritHandles: bool,
-    dwCreationFlags: windows.DWORD,
-    lpEnvironment: ?*anyopaque,
-    lpCurrentDirectory: ?[*:0]const u8,
-    lpStartupInfo: *STARTUPINFOEX,
-    lpProcessInformation: *windows.PROCESS_INFORMATION,
-) callconv(.C) bool;
-
-extern "kernel32" fn SetStdHandle(
-    hId: windows.DWORD,
-    hHandle: windows.HANDLE,
-) callconv(.C) bool;
-
-extern "kernel32" fn CreateFileA(
-    lpFileName: [*:0]const u8,
-    dwDesiredAccess: windows.DWORD,
-    dwShareMode: windows.DWORD,
-    lpSecurityAttributes: ?*anyopaque,
-    dwCreationDisposition: windows.DWORD,
-    dwFlagsAndAttributes: windows.DWORD,
-    hTemplateFile: ?windows.HANDLE,
-) callconv(.C) windows.HANDLE;
-
-extern "kernel32" fn PeekNamedPipe(
-    hNamedPipe: windows.HANDLE,
-    lpBuffer: ?*u8,
-    nBufferSize: windows.DWORD,
-    lpBytesRead: ?*windows.DWORD,
-    lpTotalBytesAvail: ?*windows.DWORD,
-    lpBytesLeftThisMessage: ?*windows.WORD,
-) callconv(.C) bool;
-
-hPC: HPCON,
+hPC: winapi.HPCON,
 pAttr: []u8,
-sInfo: STARTUPINFOEX,
+sInfo: winapi.STARTUPINFOEX,
 pInfo: windows.PROCESS_INFORMATION,
 hPipeIn: windows.HANDLE,
 hPipeOut: windows.HANDLE,
@@ -122,7 +15,7 @@ allocator: std.mem.Allocator,
 pub fn init(allocator: std.mem.Allocator, shell: []const u8) !Self {
     var conMode: windows.DWORD = 0;
 
-    const hStdIn = CreateFileA(
+    const hStdIn = winapi.CreateFileA(
         "CONIN$",
         windows.GENERIC_READ | windows.GENERIC_WRITE,
         windows.FILE_SHARE_READ | windows.FILE_SHARE_WRITE,
@@ -134,7 +27,7 @@ pub fn init(allocator: std.mem.Allocator, shell: []const u8) !Self {
 
     if (hStdIn == windows.INVALID_HANDLE_VALUE) return error.CreateFileA;
 
-    const hStdOut = CreateFileA(
+    const hStdOut = winapi.CreateFileA(
         "CONOUT$",
         windows.GENERIC_READ | windows.GENERIC_WRITE,
         windows.FILE_SHARE_READ | windows.FILE_SHARE_WRITE,
@@ -154,20 +47,19 @@ pub fn init(allocator: std.mem.Allocator, shell: []const u8) !Self {
         conMode | windows.ENABLE_VIRTUAL_TERMINAL_PROCESSING | windows.DISABLE_NEWLINE_AUTO_RETURN,
     ) == 0) return error.SetConsoleMode1;
 
-    if (!SetStdHandle(windows.STD_INPUT_HANDLE, hStdIn) or !SetStdHandle(windows.STD_OUTPUT_HANDLE, hStdOut))
+    if (!winapi.SetStdHandle(windows.STD_INPUT_HANDLE, hStdIn) or !winapi.SetStdHandle(windows.STD_OUTPUT_HANDLE, hStdOut))
         return error.SetStdHandle;
 
-    var hPC: HPCON = undefined;
+    var hPC: winapi.HPCON = undefined;
     var hPtyIn: windows.HANDLE = windows.INVALID_HANDLE_VALUE;
     var hPtyOut: windows.HANDLE = windows.INVALID_HANDLE_VALUE;
 
     var hPipeIn: windows.HANDLE = windows.INVALID_HANDLE_VALUE;
     var hPipeOut: windows.HANDLE = windows.INVALID_HANDLE_VALUE;
 
-    if (!CreatePipe(&hPtyIn, &hPipeIn, null, 1) or hPtyIn == windows.INVALID_HANDLE_VALUE)
-        return error.CreatePipe;
+    try winapi.getOverlappedPipe(&hPtyOut, &hPipeOut);
 
-    if (!CreatePipe(&hPipeOut, &hPtyOut, null, 1) or hPtyOut == windows.INVALID_HANDLE_VALUE)
+    if (!winapi.CreatePipe(&hPtyIn, &hPipeIn, null, 1) or hPtyIn == windows.INVALID_HANDLE_VALUE)
         return error.CreatePipe;
 
     var csbi: windows.CONSOLE_SCREEN_BUFFER_INFO = undefined;
@@ -179,25 +71,25 @@ pub fn init(allocator: std.mem.Allocator, shell: []const u8) !Self {
     conSize.X = 94; //csbi.srWindow.Right - csbi.srWindow.Left + 1;
     conSize.Y = 42; //csbi.srWindow.Bottom - csbi.srWindow.Top + 1;
 
-    if (CreatePseudoConsole(conSize, hPtyIn, hPtyOut, 0, &hPC) != 0)
+    if (winapi.CreatePseudoConsole(conSize, hPtyIn, hPtyOut, 0, &hPC) != 0)
         return error.CreatePseudoConsole;
 
-    var sInfo = std.mem.zeroInit(STARTUPINFOEX, .{
+    var sInfo = std.mem.zeroInit(winapi.STARTUPINFOEX, .{
         .StartupInfo = .{
-            .cb = @as(windows.DWORD, @truncate(@sizeOf(STARTUPINFO))),
+            .cb = @as(windows.DWORD, @truncate(@sizeOf(winapi.STARTUPINFO))),
         },
     });
 
     var attrListSize: usize = 0;
-    _ = InitializeProcThreadAttributeList(null, 1, 0, &attrListSize);
+    _ = winapi.InitializeProcThreadAttributeList(null, 1, 0, &attrListSize);
 
     const pAttrList = try allocator.alloc(u8, attrListSize);
 
     sInfo.lpAttributeList = @ptrCast(pAttrList);
-    if (!InitializeProcThreadAttributeList(sInfo.lpAttributeList, 1, 0, &attrListSize))
+    if (!winapi.InitializeProcThreadAttributeList(sInfo.lpAttributeList, 1, 0, &attrListSize))
         return error.InitializeProcThreadAttributeList;
 
-    if (!UpdateProcThreadAttribute(sInfo.lpAttributeList, 0, 0x00020016, hPC, @sizeOf(HPCON), null, null))
+    if (!winapi.UpdateProcThreadAttribute(sInfo.lpAttributeList, 0, 0x00020016, hPC, @sizeOf(winapi.HPCON), null, null))
         return error.UpdateProcThreadAttribute;
 
     var pInfo: windows.PROCESS_INFORMATION = undefined;
@@ -205,7 +97,18 @@ pub fn init(allocator: std.mem.Allocator, shell: []const u8) !Self {
     const zCmd = try allocator.dupeZ(u8, shell);
     defer allocator.free(zCmd);
 
-    if (!CreateProcessA(null, zCmd, null, null, false, EXTENDED_STARTUPINFO_PRESENT, null, null, &sInfo, &pInfo))
+    if (!winapi.CreateProcessA(
+        null,
+        zCmd,
+        null,
+        null,
+        false,
+        winapi.EXTENDED_STARTUPINFO_PRESENT,
+        null,
+        null,
+        &sInfo,
+        &pInfo,
+    ))
         return error.CreateProcessA;
 
     return .{
@@ -220,7 +123,7 @@ pub fn init(allocator: std.mem.Allocator, shell: []const u8) !Self {
 }
 
 pub fn deinit(self: *Self) void {
-    ClosePseudoConsole(self.hPC);
+    winapi.ClosePseudoConsole(self.hPC);
     windows.CloseHandle(self.hPipeIn);
     windows.CloseHandle(self.hPipeOut);
 
@@ -236,34 +139,62 @@ pub fn isAlive(self: Self) bool {
     return exitCode == 259;
 }
 
-fn pipeToTunnel(hPipe: windows.HANDLE, tunnel: Tunnel) void {
-    var buffer: [1024]u8 = undefined;
-    var size: windows.DWORD = 0;
-    while (PeekNamedPipe(hPipe, null, 0, null, &size, null) and size > 0) {
-        if (windows.kernel32.ReadFile(hPipe, buffer[0..], buffer.len, &size, null) != 0 and size > 0) {
-            tunnel.writeFrame(buffer[0..size]) catch return;
-        }
-    }
+pub fn resize(self: *Self, cols: u16, rows: u16) void {
+    _ = winapi.ResizePseudoConsole(self.hPC, .{
+        .X = @bitCast(cols),
+        .Y = @bitCast(rows),
+    });
 }
 
-const POLLRDNORM = 0x0100;
-const POLLWRNORM = 0x0010;
+fn overlap_callback(
+    dwErrorCode: std.os.windows.DWORD,
+    dwNumberOfBytesTransfered: std.os.windows.DWORD,
+    lpOverlapped: ?*std.os.windows.OVERLAPPED,
+) callconv(.C) void {
+    _ = .{lpOverlapped};
+    // std.debug.print("[CALLBACK] Error: 0x{x}, Read: {d} bytes\n", .{ dwErrorCode, dwNumberOfBytesTransfered });
+    if (dwErrorCode != 0 or dwNumberOfBytesTransfered == 0) return;
+    //conn.writeFrame(buffer[0..dwNumberOfBytesTransfered]) catch {
+    //    running = false;
+    //};
+}
 
 pub fn run(self: *Self, tunnel: Tunnel) !void {
     var fds = [_]std.os.windows.ws2_32.pollfd{.{
         .fd = tunnel.stream.handle,
-        .events = POLLRDNORM | POLLWRNORM,
+        .events = winapi.POLLRDNORM | winapi.POLLWRNORM,
         .revents = 0,
     }};
 
+    defer self.deinit();
+
+    var buffer: [4096]u8 = undefined;
+    var overlap: windows.OVERLAPPED = std.mem.zeroes(windows.OVERLAPPED);
+
+    if (!winapi.ReadFileEx(self.hPipeOut, &buffer, buffer.len, &overlap, overlap_callback)) {
+        return error.ReadFileEx;
+    }
+
     while (self.isAlive()) {
-        // TODO: This will spin the CPU when there is no data to read from the socket or the terminal. We need to find
-        // a better way to poll on both ends.
         if (std.os.windows.ws2_32.WSAPoll(&fds, fds.len, -1) == 0) continue;
-        if (fds[0].revents & POLLWRNORM != 0) pipeToTunnel(self.hPipeOut, tunnel);
-        if (fds[0].revents & POLLRDNORM == 0) continue;
+        if (winapi.SleepEx(10, true) == winapi.WAIT_IO_COMPLETION) {
+            try tunnel.writeFrame(buffer[0..overlap.InternalHigh]);
+            overlap = std.mem.zeroes(windows.OVERLAPPED);
+            if (!winapi.ReadFileEx(self.hPipeOut, &buffer, buffer.len, &overlap, overlap_callback)) {
+                return error.ReadFileEx;
+            }
+        }
+
+        if (fds[0].revents & winapi.POLLRDNORM == 0) continue;
         const data = try tunnel.readFrame(self.allocator);
         defer self.allocator.free(data);
+
+        if (data.len == 8 and std.mem.startsWith(u8, data, "\x00\xff\x00\xff")) {
+            const cols = std.mem.readInt(u16, data[4..][0..2], .big);
+            const rows = std.mem.readInt(u16, data[6..][0..2], .big);
+            self.resize(cols, rows);
+            continue;
+        }
 
         if (data.len == 0) continue;
 
