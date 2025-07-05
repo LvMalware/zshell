@@ -108,8 +108,7 @@ fn runPosix(self: Self) !void {
     }
 }
 
-// even though this function does nothing, we still need it because SleepEx won't know if the I/O operation was
-// completed unless a completion routine is called... (yes, windows is sh*t like that)
+// let's use this function here to also handle console resizing on windows
 fn overlap_callback(
     dwErrorCode: std.os.windows.DWORD,
     dwNumberOfBytesTransfered: std.os.windows.DWORD,

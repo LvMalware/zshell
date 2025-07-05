@@ -26,6 +26,12 @@ fn setNonBlock(sock: std.net.Stream) void {
     }
 }
 
+fn serverThread(allocator: std.mem.Allocator, client: *Tunnel, command: ?[]const u8) void {
+    defer client.deinit();
+    var shell = Shell.init(allocator, command) catch return;
+    shell.run(client.*) catch {};
+}
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
@@ -39,6 +45,7 @@ pub fn main() !void {
             .{ "shell", ?[]const u8, null, "Shell/command to be served to the client" },
             .{ "server", bool, false, "Act as a server" },
             .{ "private", ?[]const u8, null, "File containning private key to use" },
+            .{ "reverse", bool, false, "Server will receive a shell / Client will send a shell" },
         },
         allocator,
     );
@@ -79,11 +86,21 @@ pub fn main() !void {
     if (parsed.flags.server) {
         var server = try Server.init(allocator, parsed.flags.host orelse "0.0.0.0", parsed.flags.port, keypair);
         defer server.deinit();
-        var client = try server.accept();
-        defer client.deinit();
-        setNonBlock(client.stream);
-        var shell = try Shell.init(allocator, parsed.flags.shell);
-        try shell.run(client);
+        while (true) {
+            var client = try server.accept();
+            setNonBlock(client.stream);
+            if (parsed.flags.reverse) {
+                defer client.deinit();
+                try Console.init(allocator, &client).run();
+                break;
+            } else {
+                var thread = std.Thread.spawn(.{}, serverThread, .{ allocator, &client, parsed.flags.shell }) catch {
+                    client.deinit();
+                    continue;
+                };
+                thread.detach();
+            }
+        }
     } else {
         if (parsed.flags.host == null) {
             try stdout.print("Missing host to connect\n", .{});
@@ -95,8 +112,11 @@ pub fn main() !void {
 
         setNonBlock(stream);
 
-        std.debug.print("Connected!\n", .{});
-
-        try Console.init(allocator, &tunnel).run();
+        if (parsed.flags.reverse) {
+            var shell = try Shell.init(allocator, parsed.flags.shell);
+            try shell.run(tunnel);
+        } else {
+            try Console.init(allocator, &tunnel).run();
+        }
     }
 }
