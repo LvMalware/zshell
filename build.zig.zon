@@ -38,11 +38,11 @@
     .dependencies = .{
         .ztunnel = .{
             .url = "https://github.com/LvMalware/ztunnel/archive/refs/heads/master.zip",
-            .hash = "ZTunnel-0.0.0-5IrGGDxGAAB-qLI5zPocgM5mY9nijKTSLd-bHrzif6Bp",
+            .hash = "ZTunnel-0.0.0-5IrGGCBKAABdLui4G2nu6nhjxV1TZOj_3fXJY0pr6Vfb",
         },
         .flags = .{
             .url = "https://github.com/LvMalware/zig-flags/archive/refs/heads/master.zip",
-            .hash = "zig_flags-0.0.0-f5MLfP04AACRG4JXmBvC0qxF2zRRjMLO3MAunPcnpmFw",
+            .hash = "zig_flags-0.0.0-f5MLfItBAACWxp9sl1B3EFfburfUvrYNw8j5yBrbRkJg",
         },
     },
 

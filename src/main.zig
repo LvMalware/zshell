@@ -36,14 +36,16 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
-    const parsed = try flags.parseFlags(
+    const parsed = try flags.parse(
         .{
             .{ "help", bool, false, "Show this help message and exit" },
             .{ "port", u16, 1337, "Port to listen/connect (default: 1337)" },
             .{ "host", ?[]const u8, null, "Host to listen/connect" },
             .{ "save", ?[]const u8, null, "File to save private key" },
             .{ "shell", ?[]const u8, null, "Shell/command to be served to the client" },
+            .{ "print", bool, false, "Print public ECC keys to stdout" },
             .{ "server", bool, false, "Act as a server" },
+            .{ "public", ?[]const u8, null, "File containning public keys (one per line) to authenticate client (in server mode)" },
             .{ "private", ?[]const u8, null, "File containning private key to use" },
             .{ "reverse", bool, false, "Server will receive a shell / Client will send a shell" },
         },
@@ -77,6 +79,13 @@ pub fn main() !void {
         break :priv Tunnel.KeyPair{ .public = public, .private = private };
     } else Tunnel.KeyPair.generate();
 
+    if (parsed.flags.print) {
+        const base64 = try allocator.alloc(u8, std.base64.standard.Encoder.calcSize(keypair.public.ecc.len));
+        _ = std.base64.standard.Encoder.encode(base64[0..], &keypair.public.ecc);
+        try stdout.print("ECC Public Key: {s}\n", .{base64});
+        defer allocator.free(base64);
+    }
+
     if (parsed.flags.save) |filename| {
         const file = try std.fs.cwd().createFile(filename, .{});
         defer file.close();
@@ -86,8 +95,11 @@ pub fn main() !void {
     if (parsed.flags.server) {
         var server = try Server.init(allocator, parsed.flags.host orelse "0.0.0.0", parsed.flags.port, keypair);
         defer server.deinit();
+        if (parsed.flags.public) |path| {
+            try server.loadPeers(path);
+        }
         while (true) {
-            var client = try server.accept();
+            var client = server.accept() catch continue;
             setNonBlock(client.stream);
             if (parsed.flags.reverse) {
                 defer client.deinit();
